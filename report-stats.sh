@@ -1,82 +1,110 @@
 #!/bin/bash
 
-# Generate statistics report for CPA-X service
-# Collects status, resource usage, and model count
+# report-stats.sh - CPA-X System Statistics Report Generator
 
-OUTPUT_DIR="."
-OUTPUT_FILE="${OUTPUT_DIR}/report-stats.md"
-API_ENDPOINT="http://127.0.0.1:8317/v1/models"
-CONFIG_FILE="/home/raven/.cli-proxy-api/config.yaml"
-TIMESTAMP=$(date -Iseconds)
+# Configuration
+API_ENDPOINT=${CPA_X_API_ENDPOINT:-"http://localhost:8080/v1/stats"}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPORT_FILE="${SCRIPT_DIR}/report-stats.md"
 
-echo "# CPA-X Statistics Report" > "$OUTPUT_FILE"
-echo "Generated: $TIMESTAMP" >> "$OUTPUT_FILE"
-echo "" >> "$OUTPUT_FILE"
+# Timestamp
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
 
-# Service status
-echo "## Service Status" >> "$OUTPUT_FILE"
-echo "" >> "$OUTPUT_FILE"
-if systemctl is-active --quiet cli-proxy-api; then
-    echo "**Status:** Active" >> "$OUTPUT_FILE"
-    # Get detailed status output
-    ACTIVE_SINCE=$(systemctl show cli-proxy-api -p ActiveEnterTimestamp --value)
-    UPTIME_SECONDS=$(systemctl show cli-proxy-api -p ActiveEnterTimestamp --value | xargs -I{} date -d {} +%s 2>/dev/null)
-    if [ -n "$UPTIME_SECONDS" ]; then
-        NOW=$(date +%s)
-        UPTIME=$(( NOW - UPTIME_SECONDS ))
-        UPTIME_HUMAN=$(printf "%dd %02dh %02dm %02ds" $((UPTIME/86400)) $((UPTIME%86400/3600)) $((UPTIME%3600/60)) $((UPTIME%60)))
-        echo "**Uptime:** $UPTIME_HUMAN" >> "$OUTPUT_FILE"
-    fi
-    PID=$(systemctl show cli-proxy-api -p MainPID --value)
-    echo "**Main PID:** $PID" >> "$OUTPUT_FILE"
-    MEMORY=$(systemctl show cli-proxy-api -p MemoryCurrent --value)
-    if [ -n "$MEMORY" ] && [ "$MEMORY" != "0" ]; then
-        MEM_MB=$(awk "BEGIN {printf \"%.1f MB\", $MEMORY/1024/1024}")
-        echo "**Memory:** $MEM_MB" >> "$OUTPUT_FILE"
-    fi
-    # CPU usage (total, not instantaneous)
-    CPU=$(systemctl show cli-proxy-api -p CPUUsageNS --value 2>/dev/null)
-    if [ -n "$CPU" ] && [ "$CPU" -gt 0 ]; then
-        CPU_SEC=$(awk "BEGIN {printf \"%.2f\", $CPU/1000000000}")
-        echo "**CPU Time:** ${CPU_SEC}s" >> "$OUTPUT_FILE"
+# Collect system metrics
+echo "Collecting system metrics..."
+
+# System uptime
+UPTIME=$(uptime -p 2>/dev/null || uptime)
+
+# System load (1, 5, 15 minute averages)
+LOAD_AVG=$(awk '/load average/ {print $10,$11,$12}' /proc/uptime 2>/dev/null || uptime | awk -F'load average:' '{print $2}')
+
+# Memory usage (in human readable)
+MEM_TOTAL=$(free -h | awk '/^Mem:/ {print $2}')
+MEM_USED=$(free -h | awk '/^Mem:/ {print $3}')
+MEM_FREE=$(free -h | awk '/^Mem:/ {print $4}')
+MEM_PERCENT=$(free | awk '/^Mem:/ {printf "%.1f%%", $3/$2 * 100}')
+
+# Disk usage for root partition
+DISK_TOTAL=$(df -h / | awk 'NR==2 {print $2}')
+DISK_USED=$(df -h / | awk 'NR==2 {print $3}')
+DISK_FREE=$(df -h / | awk 'NR==2 {print $4}')
+DISK_PERCENT=$(df -h / | awk 'NR==2 {print $5}')
+
+# Initialize API stats
+ACTIVE_CONNECTIONS="N/A"
+API_CALLS="N/A"
+RESPONSE_TIME="N/A"
+API_STATUS="Not reachable"
+
+# Try to fetch API statistics
+if command -v curl &> /dev/null; then
+    echo "Attempting to fetch CPA-X statistics from ${API_ENDPOINT}..."
+    if curl -s --connect-timeout 5 --max-time 10 "${API_ENDPOINT}" > "${SCRIPT_DIR}/api_response.json" 2>/dev/null; then
+        API_STATUS="Reachable"
+        # Try to parse JSON-like responses (simple extraction)
+        API_RESPONSE=$(cat "${SCRIPT_DIR}/api_response.json")
+        
+        # Extract common field patterns (case-insensitive)
+        ACTIVE_CONNECTIONS=$(echo "$API_RESPONSE" | grep -io '"active_connections"\s*:\s*[0-9.]*' | head -1 | grep -o '[0-9.]*')
+        API_CALLS=$(echo "$API_RESPONSE" | grep -io '"api_calls"\s*:\s*[0-9.]*' | head -1 | grep -o '[0-9.]*')
+        RESPONSE_TIME=$(echo "$API_RESPONSE" | grep -io '"response_time"\s*:\s*[0-9.]*' | head -1 | grep -o '[0-9.]*')
+        
+        # Fallback to generic extraction if specific fields not found
+        if [ -z "$ACTIVE_CONNECTIONS" ] || [ "$ACTIVE_CONNECTIONS" = "N/A" ]; then
+            ACTIVE_CONNECTIONS=$(echo "$API_RESPONSE" | grep -io 'active_connections\s*[:=]\s*[0-9.]*' | head -1 | grep -o '[0-9.]*')
+        fi
+        if [ -z "$API_CALLS" ] || [ "$API_CALLS" = "N/A" ]; then
+            API_CALLS=$(echo "$API_RESPONSE" | grep -io 'api_calls\s*[:=]\s*[0-9.]*' | head -1 | grep -o '[0-9.]*')
+        fi
+        if [ -z "$RESPONSE_TIME" ] || [ "$RESPONSE_TIME" = "N/A" ]; then
+            RESPONSE_TIME=$(echo "$API_RESPONSE" | grep -io 'response_time\s*[:=]\s*[0-9.]*' | head -1 | grep -o '[0-9.]*')
+        fi
+        
+        # Set defaults if still empty
+        [ -z "$ACTIVE_CONNECTIONS" ] && ACTIVE_CONNECTIONS="N/A"
+        [ -z "$API_CALLS" ] && API_CALLS="N/A"
+        [ -z "$RESPONSE_TIME" ] && RESPONSE_TIME="N/A"
+        
+        rm -f "${SCRIPT_DIR}/api_response.json"
+    else
+        API_STATUS="Connection failed"
     fi
 else
-    echo "**Status:** Inactive" >> "$OUTPUT_FILE"
-fi
-echo "" >> "$OUTPUT_FILE"
-
-# Model count
-echo "## Models" >> "$OUTPUT_FILE"
-echo "" >> "$OUTPUT_FILE"
-
-# Extract API key
-if [ -f "$CONFIG_FILE" ]; then
-    API_KEY=$(grep -A 10 'api-keys:' "$CONFIG_FILE" | grep -E '^\s*-\s*sk-' | head -1 | sed -E 's/^\s*-\s*//')
-    if [ -z "$API_KEY" ]; then
-        API_KEY="dashboard-key-2026"
-    fi
-else
-    API_KEY="dashboard-key-2026"
+    API_STATUS="curl not installed"
 fi
 
-response=$(curl -s -H "Authorization: Bearer $API_KEY" "$API_ENDPOINT") 2>/dev/null
-model_count=$(echo "$response" | jq -r '.data // [] | length' 2>/dev/null || echo "N/A")
-echo "**Total Models:** $model_count" >> "$OUTPUT_FILE"
+# Generate markdown report
+cat <<EOF > "${REPORT_FILE}"
+# CPA-X System Statistics Report
 
-# Extract provider distribution if available
-if [ "$model_count" != "N/A" ] && [ "$model_count" -gt 0 ]; then
-    echo "" >> "$OUTPUT_FILE"
-    echo "### Models by Provider" >> "$OUTPUT_FILE"
-    echo "" >> "$OUTPUT_FILE"
-    echo "| Provider | Count |" >> "$OUTPUT_FILE"
-    echo "|----------|-------|" >> "$OUTPUT_FILE"
-    echo "$response" | jq -r '.data[] | .owned_by' | sort | uniq -c | sort -nr | while read -r count provider; do
-        echo "| $provider | $count |" >> "$OUTPUT_FILE"
-    done
-fi
+**Generated:** ${TIMESTAMP}
 
-echo "" >> "$OUTPUT_FILE"
-echo "*Report generated by report-stats.sh*" >> "$OUTPUT_FILE"
+## System Overview
 
-echo "Report generated: $OUTPUT_FILE"
-exit 0
+| Metric | Value |
+|--------|-------|
+| System Uptime | ${UPTIME} |
+| System Load (1, 5, 15 min) | ${LOAD_AVG} |
+| Memory Total | ${MEM_TOTAL} |
+| Memory Used | ${MEM_USED} |
+| Memory Free | ${MEM_FREE} |
+| Memory Usage | ${MEM_PERCENT} |
+| Disk Total (/) | ${DISK_TOTAL} |
+| Disk Used (/) | ${DISK_USED} |
+| Disk Free (/) | ${DISK_FREE} |
+| Disk Usage (/) | ${DISK_PERCENT} |
+
+## CPA-X Operational Metrics
+
+| Metric | Value |
+|--------|-------|
+| API Endpoint | ${API_ENDPOINT} |
+| API Status | ${API_STATUS} |
+| Active Connections | ${ACTIVE_CONNECTIONS} |
+| API Calls (total) | ${API_CALLS} |
+| Avg Response Time | ${RESPONSE_TIME} |
+
+EOF
+
+echo "Report saved to: ${REPORT_FILE}"
