@@ -1,0 +1,70 @@
+# CLIProxyAPI (CPA-X) Configuration Template
+# NEXUS Stack: Local AI Proxy/Gateway
+#
+# This is a template. Copy this file to /home/raven/.cli-proxy-api/config.yaml
+# and replace placeholders with actual values.
+#
+# IMPORTANT: Never commit real secrets to version control.
+
+host: "0.0.0.0"
+port: 8317
+auth-dir: "/home/raven/.cli-proxy-api"
+
+# Management API key
+remote-management:
+  allow-remote: true
+  secret-key: "$2b$12$REPLACE_WITH_BCRYPT_HASH_OF_YOUR_MANAGEMENT_KEY"
+
+# Client API keys
+api-keys:
+  - sk-REPLACE_WITH_YOUR_OPENAI_COMPATIBLE_KEY_1
+  - sk-REPLACE_WITH_YOUR_OPENAI_COMPATIBLE_KEY_2
+
+# Performance: transparent retry across API keys on 429/5xx
+request-retry: 3
+max-retry-credentials: 0
+max-retry-interval: 5
+
+# Streaming keepalives to prevent idle disconnects
+streaming:
+  keepalive-seconds: 15
+  bootstrap-retries: 2
+
+# Non-streaming keepalive interval
+nonstream-keepalive-interval: 30
+debug: false
+
+# Usage tracking
+usage-statistics-enabled: true
+
+# Routing strategy with session affinity
+routing:
+  strategy: "round-robin"
+  session-affinity: true
+  session-affinity-ttl: "5m"
+
+# OpenAI-compatible providers
+openai-compatibility:
+  - name: "nvidia"
+    base-url: "https://integrate.api.nvidia.com/v1"
+    api-key-entries:
+      - api-key: "nvapi-REPLACE_WITH_YOUR_NVIDIA_KEY_1"
+      - api-key: "nvapi-REPLACE_WITH_YOUR_NVIDIA_KEY_2"
+    models:
+      - name: "nvidia/nemotron-3-super-120b-a12b"
+        alias: "nemotron"
+      - name: "meta/llama-3.1-8b-instruct"
+        alias: "llama-8b"
+      # Add more models as needed
+
+  - name: "openrouter"
+    base-url: "https://openrouter.ai/api/v1"
+    api-key-entries:
+      - api-key: "sk-or-v1-REPLACE_WITH_YOUR_OPENROUTER_KEY"
+    models:
+      - name: "inclusionai/ring-2.6-1t:free"
+        alias: "ring-1t"
+      # Add more models as needed
+
+  # Additional provider configurations can be added here
+  # See full list in the documentation.

@@ -1,0 +1,41 @@
+# Secrets and sensitive files
+*.key
+*.pem
+.env
+.secret*
+credentials.json
+secrets.yaml
+config.local.yaml
+.local.yaml
+
+# Generated reports (keep them out of version control)
+report-*.md
+
+# Backup and temp files
+*~
+*.bak
+*.tmp
+/tmp/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+cron-test.log
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node and Python caches (if any)
+node_modules/
+__pycache__/
+*.pyc
+
+# Specific to this project: real config (should be in ~/.cli-proxy-api/)
+# If someone mistakenly puts a config here, ignore it
+config-real.yaml
