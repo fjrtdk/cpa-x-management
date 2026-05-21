@@ -4,38 +4,44 @@
 
 set -euo pipefail
 
-REPO_DIR="/home/raven/cpa-x-management"
-LOG_FILE="/home/raven/.sisyphus/evidence/step-5-github/backup.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="${HOME}/.sisyphus/evidence/step-5-github/backup.log"
+TIMESTAMP=$(date -Iseconds)
 
-# Ensure we're in the repo directory
-cd "$REPO_DIR"
+# Ensure log directory exists
 
-# Optional: Pull latest changes to avoid conflicts
-if git rev-parse --verify origin >/dev/null 2>&1; then
-    git fetch origin
-    # Try to reapply local commits on top of remote, but don't rebase uncommitted changes
-    # We'll just commit first, then push; if push fails due to non-fast-forward, we abort.
+cd "$SCRIPT_DIR"
+
+mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+
+# Pull latest to reduce conflict risk
+if git rev-parse --verify origin/master >/dev/null 2>&1; then
+    git fetch origin 2>/dev/null || true
 fi
 
 # Stage all changes
 git add -A
 
-# Check if there are any changes to commit
 if git diff-index --quiet HEAD --; then
-    echo "$(date -Iseconds): No changes to backup." >> "$LOG_FILE"
+    echo "${TIMESTAMP}: No changes to backup." >> "$LOG_FILE"
     exit 0
 fi
 
-# Commit with timestamped message
-COMMIT_MSG="Automated backup $(date -Iseconds)"
-git commit -m "$COMMIT_MSG"
+COMMIT_MSG="Automated backup ${TIMESTAMP}"
+git commit -m "${COMMIT_MSG}"
 
-# Attempt to push
-if git push origin master 2>/dev/null; then
-    echo "$(date -Iseconds): Backup successful. $COMMIT_MSG" >> "$LOG_FILE"
+# Try current branch first, fallback to master
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if push_out=$(git push origin "${BRANCH}" 2>&1); then
+    echo "${TIMESTAMP}: Backup successful (${BRANCH}). ${COMMIT_MSG}" >> "$LOG_FILE"
 else
-    echo "$(date -Iseconds): ERROR: Push failed. Manual intervention required." >> "$LOG_FILE"
-    exit 1
+    echo "${TIMESTAMP}: Push to ${BRANCH} failed: ${push_out}" >> "$LOG_FILE"
+    if [ "${BRANCH}" != "master" ] && push_out2=$(git push origin master 2>&1); then
+        echo "${TIMESTAMP}: Backup successful (master fallback). ${COMMIT_MSG}" >> "$LOG_FILE"
+    else
+        echo "${TIMESTAMP}: ERROR: Push to master also failed: ${push_out2:-}" >> "$LOG_FILE"
+        exit 1
+    fi
 fi
 
 exit 0

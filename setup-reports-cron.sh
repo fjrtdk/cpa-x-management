@@ -1,5 +1,15 @@
 #!/bin/bash
+# Install/reinstall the CPA-X reports cron job.
+# Usage: ./setup-reports-cron.sh [--force|-f]
 set -e
+
+FORCE=false
+for arg in "$@"; do
+    case "$arg" in
+        --force|-f) FORCE=true ;;
+        *) echo "Unknown flag: $arg"; echo "Usage: $0 [--force|-f]"; exit 1 ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="/var/log/cpa-x-reports.log"
@@ -25,11 +35,11 @@ fi
 if [ ! -f "$LOG_FILE" ]; then
     echo "Creating log file: $LOG_FILE"
     if sudo touch "$LOG_FILE" 2>/dev/null; then
-        sudo chown raven:raven "$LOG_FILE" 2>/dev/null || true
+        sudo chown "${USER}:${USER}" "$LOG_FILE" 2>/dev/null || true
         sudo chmod 644 "$LOG_FILE" 2>/dev/null || true
     else
         echo "WARNING: Could not create log file. Will attempt when cron runs."
-        echo "You may need to run: sudo touch $LOG_FILE && sudo chown raven:raven $LOG_FILE && sudo chmod 644 $LOG_FILE"
+        echo "You may need to run: sudo touch $LOG_FILE && sudo chown ${USER}:${USER} $LOG_FILE && sudo chmod 644 $LOG_FILE"
     fi
 fi
 
@@ -39,13 +49,17 @@ if [ -n "$EXISTING_CRON" ]; then
     echo "Existing cron job found for CPA-X reports:"
     echo "$EXISTING_CRON"
     echo ""
-    read -p "Do you want to replace it? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Setup cancelled. No changes made."
-        exit 0
+    if [ "$FORCE" = false ]; then
+        read -r -p "Replace it? (y/N): " -n 1 REPLY
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Setup cancelled. No changes made."
+            exit 0
+        fi
+    else
+        echo "--force: replacing existing cron job without prompt."
     fi
-    
+
     crontab -l 2>/dev/null | grep -v "report-models.sh" | crontab -
     echo "Removed existing cron entries."
 fi
